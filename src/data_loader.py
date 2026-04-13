@@ -180,6 +180,15 @@ def build_base_dataset(data_dir: str = "data") -> pd.DataFrame:
     # Join valuations with aggregated appearances on (player_id, season)
     df = val.merge(app_agg, on=["player_id", "season"], how="inner")
 
+    print("Computing previous season value (lag feature)...")
+    # Create a lookup: (player_id, season) → market_value_in_eur
+    prev_val = val[["player_id", "season", "market_value_in_eur"]].copy()
+    prev_val["season"] = prev_val["season"] + 1  # shift forward so season N holds value from season N-1
+    prev_val = prev_val.rename(columns={"market_value_in_eur": "prev_season_value"})
+    df = df.merge(prev_val[["player_id", "season", "prev_season_value"]],
+                  on=["player_id", "season"], how="left")
+    df["prev_season_value"] = df["prev_season_value"].fillna(0)
+
     print("Joining player profiles...")
     players = tables["players"].copy()
     players = players.rename(columns={

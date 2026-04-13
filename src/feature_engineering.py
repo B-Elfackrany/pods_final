@@ -64,6 +64,11 @@ def compute_player_features(df: pd.DataFrame) -> pd.DataFrame:
     # Foot — fill missing
     df["foot"] = df["foot"].fillna("unknown")
 
+    # Age × Position interaction features
+    # Strikers peak earlier (~25-27) than defenders (~28-31)
+    for pos in ["Attack", "Midfield", "Defender", "Goalkeeper"]:
+        df[f"age_x_{pos.lower()}"] = df["age"] * (df["position_group"] == pos).astype(int)
+
     return df
 
 
@@ -80,8 +85,18 @@ def compute_derived_features(df: pd.DataFrame) -> pd.DataFrame:
         9999.0,
     )
 
+    # Goal involvement per appearance (more robust than per-90 when minutes have noise)
+    df["goal_involvement_per_app"] = np.where(
+        df["num_appearances"] > 0,
+        df["goal_involvement"] / df["num_appearances"],
+        0.0,
+    )
+
     # Champions league flag (1 if any CL/EL appearances)
     df["champions_league_flag"] = (df["champions_league_apps"] > 0).astype(int)
+
+    # League × goal involvement interaction: goals+assists in top-5 leagues worth more
+    df["goal_involvement_x_league"] = df["goal_involvement"] * df["league_tier"]
 
     return df
 
@@ -176,6 +191,10 @@ def engineer_features(base_df: pd.DataFrame,
     # Step 6: Log-transform target
     df["log_market_value"] = np.log1p(df["market_value_in_eur"])
 
+    # Step 7: Log-transform previous season value (lag feature)
+    if "prev_season_value" in df.columns:
+        df["log_prev_season_value"] = np.log1p(df["prev_season_value"])
+
     # Select and order final columns
     final_columns = [
         # Identifiers
@@ -183,6 +202,7 @@ def engineer_features(base_df: pd.DataFrame,
         # Player profile
         "age", "age_squared", "is_peak_age", "position_group", "sub_position",
         "foot", "height_in_cm", "country_of_citizenship", "confederation",
+        "age_x_attack", "age_x_midfield", "age_x_defender", "age_x_goalkeeper",
         # Club / league context
         "club_name", "stadium_seats", "league_tier",
         "domestic_competition_id", "champions_league_flag", "champions_league_apps",
@@ -193,8 +213,11 @@ def engineer_features(base_df: pd.DataFrame,
         "goals_per_90", "assists_per_90", "yellow_cards_per_90", "red_cards_per_90",
         # Derived
         "goal_involvement", "minutes_per_goal_involvement",
+        "goal_involvement_per_app", "goal_involvement_x_league",
         # Transfer history
         "num_transfers", "highest_previous_fee", "total_transfer_fees",
+        # Lag feature
+        "prev_season_value", "log_prev_season_value",
         # Target
         "market_value_in_eur", "log_market_value",
     ]

@@ -32,13 +32,16 @@ from xgboost import XGBRegressor
 
 NUMERIC_FEATURES = [
     "age", "age_squared", "is_peak_age", "height_in_cm",
+    "age_x_attack", "age_x_midfield", "age_x_defender", "age_x_goalkeeper",
     "stadium_seats", "league_tier", "champions_league_flag",
     "champions_league_apps",
     "total_goals", "total_assists", "total_minutes", "num_appearances",
     "total_yellow_cards", "total_red_cards",
     "goals_per_90", "assists_per_90", "yellow_cards_per_90", "red_cards_per_90",
     "goal_involvement", "minutes_per_goal_involvement",
+    "goal_involvement_per_app", "goal_involvement_x_league",
     "num_transfers", "highest_previous_fee", "total_transfer_fees",
+    "log_prev_season_value",
 ]
 
 CATEGORICAL_FEATURES = [
@@ -95,7 +98,7 @@ def get_sklearn_models() -> dict:
         ]),
         "KNN Regressor": Pipeline([
             ("preprocessor", build_preprocessor()),
-            ("model", KNeighborsRegressor(n_neighbors=5, weights="distance")),
+            ("model", KNeighborsRegressor(n_neighbors=10, weights="distance")),
         ]),
         "Random Forest": Pipeline([
             ("preprocessor", build_preprocessor()),
