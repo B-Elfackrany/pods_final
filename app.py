@@ -28,7 +28,7 @@ with st.sidebar:
             "players": f"{df['player_id'].nunique():,}",
             "records": f"{len(df):,}",
             "seasons": f"{int(df['season'].min())}–{int(df['season'].max())}",
-            "models": "7",
+            "models": "8",
         }
     try:
         stats = get_quick_stats()
@@ -36,7 +36,7 @@ with st.sidebar:
             f"""
             **📊 Dataset**  
             {stats['players']} players | {stats['records']} records  
-            Seasons {stats['seasons']} | {stats['models']} ML models
+            Seasons {stats['seasons']} | {stats['models']} ML models trained
             """
         )
     except Exception:
@@ -82,9 +82,9 @@ st.markdown(
     |---|---|
     | 🏠 **Business Case** | Problem context, dataset structure, data quality |
     | 📊 **Visualizations** | 11 interactive charts — age curves, league premiums, CL effect |
-    | 🔮 **Predictions** | Model comparison, live estimator, undervalued players |
+    | 🔮 **Predictions** | Model comparison, live estimator, undervalued & overvalued players |
     | 🧠 **Explainability** | SHAP analysis — global, by position, individual player |
-    | ⚙️ **Tuning** | Hyperparameter optimization & bias-variance tradeoffs |
+    | ⚙️ **Tuning** | Hyperparameter optimization, position encoding experiments, W&B sweeps |
     """
 )
 

@@ -12,6 +12,15 @@ st.set_page_config(page_title="Business Case", page_icon="🏠", layout="wide")
 st.title("🏠 Business Case & Data Presentation")
 st.markdown("### The Problem: How Much Is a Football Player Worth?")
 
+# ── Data scope toggle (Request #10) ──
+TOP5_IDS = {"GB1", "ES1", "IT1", "L1", "FR1"}
+data_scope = st.sidebar.radio(
+    "🏟️ Data Scope",
+    ["All Players", "Top 5 Leagues Only", "€10M+ Players Only"],
+    index=0,
+    key="bc_scope",
+)
+
 # ── Business problem ──
 st.markdown(
     """
@@ -43,8 +52,16 @@ def load_raw_tables():
         tables[name] = pd.read_csv(f"data/{name}.csv", low_memory=False)
     return tables
 
-df = load_features()
+df_full = load_features()
 raw = load_raw_tables()
+
+# Apply scope filter
+if data_scope == "Top 5 Leagues Only":
+    df = df_full[df_full["domestic_competition_id"].isin(TOP5_IDS)].copy()
+elif data_scope == "€10M+ Players Only":
+    df = df_full[df_full["market_value_in_eur"] >= 10_000_000].copy()
+else:
+    df = df_full.copy()
 
 # ── Key stats ──
 st.subheader("📈 Dataset at a Glance")

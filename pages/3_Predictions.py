@@ -27,6 +27,15 @@ plt.rcParams.update({
 
 st.title("🔮 Predictions")
 
+# ── Data scope toggle (Request #10) ──
+TOP5_IDS = {"GB1", "ES1", "IT1", "L1", "FR1"}
+data_scope = st.sidebar.radio(
+    "🏟️ Data Scope",
+    ["All Players", "Top 5 Leagues Only", "€10M+ Players Only"],
+    index=0,
+    key="pred_scope",
+)
+
 # ── Load artifacts ──
 @st.cache_data
 def load_results():
@@ -48,9 +57,27 @@ def load_feature_info():
     with open("models/feature_info.json") as f:
         return json.load(f)
 
+@st.cache_data
+def load_features():
+    return pd.read_parquet("data/processed/features.parquet")
+
 results = load_results()
-predictions = load_predictions()
+predictions_raw = load_predictions()
 feature_info = load_feature_info()
+
+# Apply scope filter to predictions
+predictions = predictions_raw.copy()
+if data_scope == "Top 5 Leagues Only":
+    df_full = load_features()
+    top5_players = df_full[df_full["domestic_competition_id"].isin(TOP5_IDS)]["player_id"].unique()
+    if "player_id" in predictions.columns:
+        predictions = predictions[predictions["player_id"].isin(top5_players)]
+elif data_scope == "€10M+ Players Only":
+    if "market_value_in_eur" in predictions.columns:
+        predictions = predictions[predictions["market_value_in_eur"] >= 10_000_000]
+
+# Build model MAE lookup for error estimates (Request #2)
+model_mae = dict(zip(results["Model"], results["MAE_EUR"]))
 
 # ═══════════════════════════════════════════════════════════════
 # Section 1: Model Comparison
@@ -80,7 +107,7 @@ with col1:
     bars = ax.barh(results["Model"], results["R2"], color=colors, edgecolor="black")
     ax.set_xlabel("R² Score")
     ax.set_title("Model Comparison — R² Score")
-    ax.set_xlim(0.5, 0.9)
+    ax.set_xlim(0.5, 0.95)
     for bar, val in zip(bars, results["R2"]):
         ax.text(bar.get_width() + 0.005, bar.get_y() + bar.get_height() / 2,
                 f"{val:.4f}", va="center", fontsize=10, color="#FAFAFA")
@@ -142,6 +169,14 @@ with col_b:
     ax.set_xlabel("Residual (€ Millions)")
     ax.set_ylabel("Count")
     ax.set_title(f"{selected_model} — Residuals Distribution")
+
+    # Add error stats (Request #2)
+    mae_val = np.mean(np.abs(residuals_eur))
+    median_err = np.median(np.abs(residuals_eur))
+    ax.annotate(f"MAE: €{mae_val:.1f}M\nMedian: €{median_err:.1f}M",
+                xy=(0.7, 0.85), xycoords="axes fraction",
+                fontsize=11, color="#FFD700", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#0E1117", alpha=0.8))
     st.pyplot(fig)
     plt.close()
 
@@ -161,7 +196,7 @@ with st.expander("💡 Why Linear Models Have Higher RMSE"):
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 3: Interactive Prediction Tool
+# Section 3: Interactive Prediction Tool (Request #2 — error estimates)
 # ═══════════════════════════════════════════════════════════════
 st.subheader("🎮 Interactive Prediction Tool")
 st.markdown("*Adjust the sliders to estimate a player's market value:*")
@@ -211,12 +246,20 @@ if st.button("⚽ Predict Market Value", type="primary", use_container_width=Tru
         "red_cards_per_90": 0,
         "goal_involvement": goal_inv,
         "minutes_per_goal_involvement": minutes_safe / goal_inv if goal_inv > 0 else 9999,
+        "goal_involvement_per_app": goal_inv / pred_appearances if pred_appearances > 0 else 0,
+        "goal_involvement_x_league": goal_inv * (1 if pred_league == "Top 5 League" else 0),
         "num_transfers": 2,
         "highest_previous_fee": 0,
         "total_transfer_fees": 0,
+        "log_prev_season_value": 0,
         "position_group": pred_position,
         "foot": pred_foot,
         "confederation": pred_confederation,
+        # Age x position interactions
+        "age_x_attack": pred_age if pred_position == "Attack" else 0,
+        "age_x_midfield": pred_age if pred_position == "Midfield" else 0,
+        "age_x_defender": pred_age if pred_position == "Defender" else 0,
+        "age_x_goalkeeper": pred_age if pred_position == "Goalkeeper" else 0,
     }])
 
     # Predict with multiple models
@@ -237,31 +280,47 @@ if st.button("⚽ Predict Market Value", type="primary", use_container_width=Tru
     for i, (display_name, file_name) in enumerate(model_files.items()):
         model = load_model(file_name)
         if model is not None:
-            log_pred = model.predict(input_data)[0]
-            log_pred = max(log_pred, 0)  # clip negative
-            eur_pred = np.expm1(log_pred)
-            predictions_live[display_name] = eur_pred
+            try:
+                log_pred = model.predict(input_data)[0]
+                log_pred = max(log_pred, 0)  # clip negative
+                eur_pred = np.expm1(log_pred)
+                predictions_live[display_name] = eur_pred
 
-            with pred_cols_display[i % len(pred_cols_display)]:
-                if eur_pred >= 1e6:
-                    display_val = f"€{eur_pred/1e6:.1f}M"
-                else:
-                    display_val = f"€{eur_pred:,.0f}"
-                st.metric(display_name, display_val)
+                # Get error margin from model MAE (Request #2)
+                mae = model_mae.get(display_name, 0)
+
+                with pred_cols_display[i % len(pred_cols_display)]:
+                    if eur_pred >= 1e6:
+                        display_val = f"€{eur_pred/1e6:.1f}M"
+                        error_display = f"± €{mae/1e6:.1f}M"
+                    else:
+                        display_val = f"€{eur_pred:,.0f}"
+                        error_display = f"± €{mae:,.0f}"
+                    st.metric(display_name, display_val)
+                    st.caption(f"Error margin: {error_display}")
+            except Exception as e:
+                with pred_cols_display[i % len(pred_cols_display)]:
+                    st.metric(display_name, "Error")
+                    st.caption(f"Prediction failed: {str(e)[:50]}")
 
     # Highlight best model
     if predictions_live:
-        best_model = max(predictions_live, key=predictions_live.get)
+        # Use XGBoost as the "best" (highest R²) rather than highest value
+        best_model = "XGBoost" if "XGBoost" in predictions_live else max(predictions_live, key=predictions_live.get)
         best_val = predictions_live[best_model]
-        st.success(f"**Best model ({best_model}) estimates: €{best_val/1e6:.1f} Million**")
+        best_mae = model_mae.get(best_model, 0)
+        st.success(
+            f"**Best model ({best_model}) estimates: €{best_val/1e6:.1f}M** "
+            f"(expected error ± €{best_mae/1e6:.1f}M)"
+        )
 
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 4: Undervalued Players
+# Section 4: Undervalued & Overvalued Players — 2025 ONLY (Request #9)
 # ═══════════════════════════════════════════════════════════════
-st.subheader("💎 Find Undervalued Players")
-st.markdown("*Players where our model predicts a significantly higher value than their actual market value — potential transfer bargains.*")
+st.subheader("💎 Most Undervalued & Overvalued Players (Latest Season)")
+st.markdown("*Players from the latest season where XGBoost predictions diverge most from actual market value.*")
 
 # Use XGBoost predictions
 xgb_col = [c for c in predictions.columns if "xgboost" in c]
@@ -270,38 +329,48 @@ if xgb_col:
     undervalued = predictions.copy()
     undervalued["actual_eur"] = np.expm1(undervalued["y_true_log"])
     undervalued["predicted_eur"] = np.expm1(undervalued[xgb_col])
+    undervalued["diff_eur"] = undervalued["predicted_eur"] - undervalued["actual_eur"]
     undervalued["diff_pct"] = (
-        (undervalued["predicted_eur"] - undervalued["actual_eur"])
-        / undervalued["actual_eur"] * 100
+        undervalued["diff_eur"] / undervalued["actual_eur"] * 100
     )
 
-    # Filter: predicted > actual by at least 100%, actual > 1M (meaningful players)
-    bargains = undervalued[
-        (undervalued["diff_pct"] > 100)
-        & (undervalued["actual_eur"] > 1_000_000)
-    ].nlargest(20, "diff_pct")
+    # Filter to latest season ONLY (Request #9)
+    if "season" in undervalued.columns:
+        latest_season = undervalued["season"].max()
+        undervalued = undervalued[undervalued["season"] == latest_season]
+        st.info(f"Showing results for season **{int(latest_season)}/{int(latest_season)+1}** only")
 
-    if len(bargains) > 0:
-        display_bargains = bargains[["player_name", "position_group", "club_name",
-                                      "season", "actual_eur", "predicted_eur", "diff_pct"]].copy()
-        display_bargains["Actual Value"] = display_bargains["actual_eur"].apply(lambda x: f"€{x:,.0f}")
-        display_bargains["Predicted Value"] = display_bargains["predicted_eur"].apply(lambda x: f"€{x:,.0f}")
-        display_bargains["Difference"] = display_bargains["diff_pct"].apply(lambda x: f"+{x:.0f}%")
-        display_bargains = display_bargains.rename(columns={
-            "player_name": "Player", "position_group": "Position",
-            "club_name": "Club", "season": "Season",
+    # Filter to meaningful players (actual > 1M)
+    undervalued = undervalued[undervalued["actual_eur"] > 1_000_000]
+
+    def format_table(df_sub, ascending=True):
+        display_df = df_sub[["player_name", "position_group", "club_name",
+                             "actual_eur", "predicted_eur", "diff_pct"]].copy()
+        display_df["Actual Value"] = display_df["actual_eur"].apply(lambda x: f"€{x:,.0f}")
+        display_df["Predicted Value"] = display_df["predicted_eur"].apply(lambda x: f"€{x:,.0f}")
+        display_df["Difference"] = display_df["diff_pct"].apply(lambda x: f"{x:+.0f}%")
+        display_df = display_df.rename(columns={
+            "player_name": "Player", "position_group": "Position", "club_name": "Club",
         })
+        return display_df[["Player", "Position", "Club", "Actual Value", "Predicted Value", "Difference"]]
 
-        st.dataframe(
-            display_bargains[["Player", "Position", "Club", "Season",
-                             "Actual Value", "Predicted Value", "Difference"]],
-            hide_index=True,
-            use_container_width=True,
-        )
-        st.caption("*Based on XGBoost model predictions. These are players whose on-pitch "
-                   "performance suggests they may be undervalued by the market.*")
-    else:
-        st.info("No significantly undervalued players found with current criteria.")
+    tab_under, tab_over = st.tabs(["🟢 Most Undervalued", "🔴 Most Overvalued"])
+
+    with tab_under:
+        bargains = undervalued.nlargest(15, "diff_pct")
+        if len(bargains) > 0:
+            st.dataframe(format_table(bargains), hide_index=True, use_container_width=True)
+            st.caption("*Players whose on-pitch performance suggests they are undervalued by the market — potential transfer bargains.*")
+        else:
+            st.info("No significantly undervalued players found.")
+
+    with tab_over:
+        overpriced = undervalued.nsmallest(15, "diff_pct")
+        if len(overpriced) > 0:
+            st.dataframe(format_table(overpriced, ascending=False), hide_index=True, use_container_width=True)
+            st.caption("*Players whose market value may exceed what their performance justifies — potential overpays.*")
+        else:
+            st.info("No significantly overvalued players found.")
 
 st.markdown(
     """

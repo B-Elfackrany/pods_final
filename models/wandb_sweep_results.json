@@ -1,0 +1,21 @@
+{
+  "sweep_id": "bjcujom9",
+  "n_trials": 30,
+  "best_config": {
+    "max_depth": 8,
+    "subsample": 0.9,
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 3
+  },
+  "best_metrics": {
+    "cv_r2_mean": 0.9224,
+    "cv_r2_std": 0.0014,
+    "mae_eur": 1387849,
+    "mape": 31.85,
+    "r2": 0.9211,
+    "rmse_eur": 3492469
+  },
+  "sweep_url": "https://wandb.ai/bae9098-new-york-university/football-value-predictor"
+}

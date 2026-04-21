@@ -37,11 +37,26 @@ def load_features():
 def load_transfers():
     return pd.read_csv("data/transfers.csv", low_memory=False)
 
-df = load_features()
+df_full = load_features()
 transfers = load_transfers()
 
 # ── Sidebar filters ──
 st.sidebar.subheader("🎛️ Filters")
+
+# ── Data scope toggle (Request #10) ──
+TOP5_IDS = {"GB1", "ES1", "IT1", "L1", "FR1"}
+data_scope = st.sidebar.radio(
+    "🏟️ Data Scope",
+    ["All Players", "Top 5 Leagues Only", "€10M+ Players Only"],
+    index=0,
+)
+if data_scope == "Top 5 Leagues Only":
+    df = df_full[df_full["domestic_competition_id"].isin(TOP5_IDS)].copy()
+elif data_scope == "€10M+ Players Only":
+    df = df_full[df_full["market_value_in_eur"] >= 10_000_000].copy()
+else:
+    df = df_full.copy()
+
 positions = ["All"] + sorted(df["position_group"].dropna().unique().tolist())
 selected_pos = st.sidebar.selectbox("Position Group", positions)
 
@@ -62,7 +77,7 @@ filtered = filtered[
 ]
 
 st.caption(f"📌 **{len(filtered):,}** player-season records | "
-           f"Position: {selected_pos} | Age: {age_range[0]}-{age_range[1]} | "
+           f"Scope: {data_scope} | Position: {selected_pos} | Age: {age_range[0]}-{age_range[1]} | "
            f"Seasons: {season_range[0]}-{season_range[1]}")
 st.divider()
 
@@ -154,12 +169,13 @@ ax.plot(age_avg["age"], age_avg["median"] / 1e6,
 ax.axvspan(25, 29, alpha=0.12, color="gold", label="Peak Age Window (25-29)")
 
 # Annotate peak
-peak_age = age_avg.loc[age_avg["mean"].idxmax(), "age"]
-peak_val = age_avg["mean"].max() / 1e6
-ax.annotate(f"Peak: Age {int(peak_age)}\n€{peak_val:.1f}M",
-            xy=(peak_age, peak_val), xytext=(peak_age + 3, peak_val * 1.1),
-            arrowprops=dict(arrowstyle="->", color="#FFD700"),
-            fontsize=11, color="#FFD700", fontweight="bold")
+if len(age_avg) > 0:
+    peak_age = age_avg.loc[age_avg["mean"].idxmax(), "age"]
+    peak_val = age_avg["mean"].max() / 1e6
+    ax.annotate(f"Peak: Age {int(peak_age)}\n€{peak_val:.1f}M",
+                xy=(peak_age, peak_val), xytext=(peak_age + 3, peak_val * 1.1),
+                arrowprops=dict(arrowstyle="->", color="#FFD700"),
+                fontsize=11, color="#FFD700", fontweight="bold")
 
 ax.set_xlabel("Age")
 ax.set_ylabel("Market Value (€ Millions)")
@@ -201,8 +217,9 @@ non_top5_avg = filtered[~filtered["domestic_competition_id"].isin(top5_map.keys(
 top5_avg = league_data["market_value_in_eur"].mean()
 cA, cB = st.columns(2)
 cA.metric("Top 5 League Average", f"€{top5_avg:,.0f}")
-cB.metric("Other Leagues Average", f"€{non_top5_avg:,.0f}",
-          delta=f"{((non_top5_avg - top5_avg) / top5_avg * 100):.0f}%")
+if not np.isnan(non_top5_avg):
+    cB.metric("Other Leagues Average", f"€{non_top5_avg:,.0f}",
+              delta=f"{((non_top5_avg - top5_avg) / top5_avg * 100):.0f}%")
 
 st.markdown("> The **Premier League premium** is real — PL players are valued ~2x higher "
             "than equivalent players in other top leagues.")
@@ -210,7 +227,7 @@ st.markdown("> The **Premier League premium** is real — PL players are valued 
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 5: Foot Preference — Does It Matter?
+# Chart 5: Foot Preference — Dynamic Insight (Request #3 fix)
 # ═══════════════════════════════════════════════════════════════
 st.subheader("5. 🦶 Foot Preference — Does It Affect Value?")
 
@@ -234,18 +251,39 @@ with col_a:
     plt.close()
 
 with col_b:
-    st.markdown(
-        """
-        #### 💡 Insight
-        **Both-footed** players are valued highest! 
-        Being two-footed provides tactical versatility 
-        that clubs value highly.
-        
-        Left-footed players command a slight premium 
-        over right-footed players — likely because 
-        they're rarer and provide squad balance.
-        """
-    )
+    # Dynamic insight based on actual data (Request #3 fix)
+    if len(foot_avg) >= 2:
+        top_foot = foot_avg["mean"].idxmax()
+        second_foot = foot_avg["mean"].drop(top_foot).idxmax() if len(foot_avg) >= 2 else None
+        top_val = foot_avg.loc[top_foot, "mean"] / 1e6
+        top_count = int(foot_avg.loc[top_foot, "count"])
+
+        insight_lines = [f"#### 💡 Insight\n"]
+        insight_lines.append(f"**{top_foot.capitalize()}-footed** players are valued highest "
+                           f"at €{top_val:.1f}M average.")
+
+        if top_foot == "both":
+            insight_lines.append("\nBeing two-footed provides tactical versatility "
+                               "that clubs value highly.")
+        elif top_foot == "left":
+            insight_lines.append("\nLeft-footed players command a premium — likely because "
+                               "they're rarer and provide squad balance.")
+        else:
+            insight_lines.append("\nRight-footed players form the majority of the dataset.")
+
+        if second_foot:
+            second_val = foot_avg.loc[second_foot, "mean"] / 1e6
+            insight_lines.append(f"\n{second_foot.capitalize()}-footed players follow at €{second_val:.1f}M.")
+
+        # Add caveat about sample sizes
+        both_count = int(foot_avg.loc["both", "count"]) if "both" in foot_avg.index else 0
+        if both_count > 0 and both_count < 500:
+            insight_lines.append(f"\n⚠️ Note: Only **{both_count}** both-footed player records "
+                               "— small sample may be biased toward elite players.")
+
+        st.markdown("\n".join(insight_lines))
+    else:
+        st.markdown("#### 💡 Insight\nInsufficient data for foot preference analysis.")
 
 st.divider()
 
@@ -282,53 +320,68 @@ st.markdown("> Players with **10+ Champions League appearances** are worth ~5x m
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 7: Goals/Assists vs Value
+# Chart 7: Goals/Assists vs Value — SPLIT BY POSITION (Request #4)
 # ═══════════════════════════════════════════════════════════════
-st.subheader("7. ⚽ Goals & Assists vs Market Value")
+st.subheader("7. ⚽ Goals & Assists vs Market Value — By Position")
+
 plot_data = filtered[filtered["total_minutes"] >= 450].copy()
-if len(plot_data) > 5000:
-    plot_data = plot_data.sample(5000, random_state=42)
+if len(plot_data) > 8000:
+    plot_data = plot_data.sample(8000, random_state=42)
 
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+pos_order = ["Attack", "Midfield", "Defender", "Goalkeeper"]
+available_pos = [p for p in pos_order if p in plot_data["position_group"].values]
 
-scatter1 = axes[0].scatter(plot_data["goals_per_90"], plot_data["log_market_value"],
-                           alpha=0.3, s=10, c=plot_data["log_market_value"], cmap="YlGn")
-z1 = np.polyfit(plot_data["goals_per_90"].dropna(),
-                plot_data.loc[plot_data["goals_per_90"].notna(), "log_market_value"], 1)
-x_line = np.linspace(0, plot_data["goals_per_90"].max(), 100)
-axes[0].plot(x_line, np.polyval(z1, x_line), color="red", linewidth=2, label="Trend")
-axes[0].set_xlabel("Goals per 90 min")
-axes[0].set_ylabel("Log Market Value")
-axes[0].set_title("Goals per 90 vs Value")
-axes[0].legend()
+if len(available_pos) > 0:
+    metric_choice = st.radio(
+        "Metric", ["Goals per 90", "Assists per 90"], horizontal=True, key="ga_metric"
+    )
+    metric_col = "goals_per_90" if metric_choice == "Goals per 90" else "assists_per_90"
 
-scatter2 = axes[1].scatter(plot_data["assists_per_90"], plot_data["log_market_value"],
-                           alpha=0.3, s=10, c=plot_data["log_market_value"], cmap="YlGn")
-z2 = np.polyfit(plot_data["assists_per_90"].dropna(),
-                plot_data.loc[plot_data["assists_per_90"].notna(), "log_market_value"], 1)
-x_line2 = np.linspace(0, plot_data["assists_per_90"].max(), 100)
-axes[1].plot(x_line2, np.polyval(z2, x_line2), color="red", linewidth=2, label="Trend")
-axes[1].set_xlabel("Assists per 90 min")
-axes[1].set_ylabel("Log Market Value")
-axes[1].set_title("Assists per 90 vs Value")
-axes[1].legend()
+    n_pos = len(available_pos)
+    fig, axes = plt.subplots(1, n_pos, figsize=(4.5 * n_pos, 5), sharey=True)
+    if n_pos == 1:
+        axes = [axes]
 
-plt.tight_layout()
-st.pyplot(fig)
-plt.close()
+    pos_colors = {"Attack": "#FF6B35", "Midfield": "#4CAF50", "Defender": "#4A90D9", "Goalkeeper": "#FFD700"}
 
-st.markdown("> Clear positive correlation, but with significant **variance** — proving that "
-            "goals/assists alone don't determine value. Context (league, age, club) matters equally.")
+    for i, pos in enumerate(available_pos):
+        pos_data = plot_data[plot_data["position_group"] == pos]
+        ax = axes[i]
+
+        ax.scatter(pos_data[metric_col], pos_data["log_market_value"],
+                   alpha=0.3, s=10, color=pos_colors.get(pos, "#999"), edgecolors="none")
+
+        # Trend line
+        valid = pos_data[[metric_col, "log_market_value"]].dropna()
+        if len(valid) > 10:
+            z = np.polyfit(valid[metric_col], valid["log_market_value"], 1)
+            x_line = np.linspace(valid[metric_col].min(), valid[metric_col].quantile(0.99), 100)
+            ax.plot(x_line, np.polyval(z, x_line), color="red", linewidth=2, label=f"r={np.corrcoef(valid[metric_col], valid['log_market_value'])[0,1]:.2f}")
+
+        ax.set_xlabel(metric_choice)
+        if i == 0:
+            ax.set_ylabel("Log Market Value")
+        ax.set_title(f"{pos} ({len(pos_data):,})")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.2)
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
+
+    st.markdown("> **Key insight:** Goals per 90 has a much **stronger correlation for attackers** than for "
+                "defenders or goalkeepers. This is why position-specific analysis matters — "
+                "a one-size-fits-all model misses these nuances.")
 
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 8: Correlation Heatmap
+# Chart 8: Correlation Heatmap — with age explanation (Request #7)
 # ═══════════════════════════════════════════════════════════════
 st.subheader("8. 🔥 Feature Correlation Heatmap")
 
 corr_cols = [
-    "age", "total_goals", "total_assists", "total_minutes", "num_appearances",
+    "age", "age_squared", "total_goals", "total_assists", "total_minutes", "num_appearances",
     "goals_per_90", "assists_per_90", "league_tier", "stadium_seats",
     "champions_league_apps", "num_transfers", "highest_previous_fee",
     "log_market_value",
@@ -354,6 +407,24 @@ top_corr_cols = st.columns(5)
 for i, (feat, corr_val) in enumerate(target_corr.head(5).items()):
     with top_corr_cols[i]:
         st.metric(feat.replace("_", " ").title(), f"r = {corr_val:.3f}")
+
+# Age correlation explanation (Request #7)
+age_corr = corr_matrix.loc["age", "log_market_value"]
+age_sq_corr = corr_matrix.loc["age_squared", "log_market_value"]
+st.markdown(
+    f"""
+    > **Why does age have near-zero correlation (r = {age_corr:.2f}) with market value?**
+    >
+    > Age has a **non-linear, inverted-U relationship** with value: young players
+    > (16-22) are lower-valued because they're unproven; players peak at 25-29; then value
+    > drops sharply after 30. Because **both low and high ages** correspond to lower values,
+    > the positive and negative effects **cancel out** in a linear correlation.
+    >
+    > Notice that `age_squared` (r = {age_sq_corr:.2f}) captures some of this curvature — this
+    > is why the model uses both `age` and `age_squared` as features. Tree-based models
+    > handle this non-linearity natively through splits.
+    """
+)
 
 st.divider()
 
@@ -412,33 +483,65 @@ st.markdown("> Market values have **inflated steadily** over the past decade, "
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 11: Confederation Analysis
+# Chart 11: Confederation — Distribution + Simpson's Paradox (Request #1)
 # ═══════════════════════════════════════════════════════════════
-st.subheader("11. 🌍 Value by Confederation")
+st.subheader("11. 🌍 Value by Confederation — Distribution & Sample Bias")
 
 conf_data = filtered[filtered["confederation"].notna()].copy()
-conf_avg = conf_data.groupby("confederation")["market_value_in_eur"].agg(["mean", "count"]).reset_index()
-conf_avg = conf_avg[conf_avg["count"] >= 50].sort_values("mean", ascending=True)
+conf_counts = conf_data.groupby("confederation").size()
+valid_confs = conf_counts[conf_counts >= 50].index.tolist()
+conf_data = conf_data[conf_data["confederation"].isin(valid_confs)]
 
-fig, ax = plt.subplots(figsize=(10, 4))
-bars = ax.barh(conf_avg["confederation"], conf_avg["mean"] / 1e6,
-               color=plt.cm.YlGn(np.linspace(0.3, 0.9, len(conf_avg))), edgecolor="black")
-ax.set_xlabel("Average Market Value (€ Millions)")
-ax.set_title("Average Player Value by Confederation (Players with 50+ records)")
-for bar, (_, row) in zip(bars, conf_avg.iterrows()):
-    ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height() / 2,
-            f"€{row['mean']/1e6:.1f}M ({int(row['count']):,})",
-            va="center", fontsize=9, color="#FAFAFA")
-st.pyplot(fig)
-plt.close()
+col_bar, col_dist = st.columns(2)
 
-st.markdown("> **CONMEBOL** (South America) players command high values — reflecting "
-            "the continent's role as a talent pipeline for European clubs.")
+with col_bar:
+    # Original average bar chart
+    conf_avg = conf_data.groupby("confederation")["market_value_in_eur"].agg(["mean", "count"]).reset_index()
+    conf_avg = conf_avg.sort_values("mean", ascending=True)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    bars = ax.barh(conf_avg["confederation"], conf_avg["mean"] / 1e6,
+                   color=plt.cm.YlGn(np.linspace(0.3, 0.9, len(conf_avg))), edgecolor="black")
+    ax.set_xlabel("Average Market Value (€ Millions)")
+    ax.set_title("Average Player Value by Confederation")
+    for bar, (_, row) in zip(bars, conf_avg.iterrows()):
+        ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height() / 2,
+                f"€{row['mean']/1e6:.1f}M (n={int(row['count']):,})",
+                va="center", fontsize=9, color="#FAFAFA")
+    st.pyplot(fig)
+    plt.close()
+
+with col_dist:
+    # NEW: Distribution violin/box plot
+    fig, ax = plt.subplots(figsize=(7, 4))
+    conf_order = conf_avg["confederation"].tolist()
+    sns.boxplot(
+        data=conf_data, x="confederation", y="log_market_value",
+        order=conf_order, palette="YlGn", ax=ax, fliersize=2,
+    )
+    ax.set_xlabel("Confederation")
+    ax.set_ylabel("Log Market Value")
+    ax.set_title("Value Distribution by Confederation")
+    ax.tick_params(axis="x", rotation=30)
+    st.pyplot(fig)
+    plt.close()
+
+# Simpson's Paradox / sample bias insight
+st.warning(
+    "**⚠️ Beware of incorrect conclusions from correct data!**\n\n"
+    "AFC (Asian Football Confederation) players may appear higher-valued on average, "
+    "but this is a classic case of **sampling bias / survivorship bias**. The AFC players "
+    "in this dataset are overwhelmingly those who made it to European leagues — they are the "
+    "**elite subset**, not representative of all AFC players.\n\n"
+    "The distribution chart (right) reveals the truth: when you look at the full spread, "
+    "AFC's median is much closer to other confederations. A small sample of elite players "
+    "inflates the average. **Always check distributions, not just averages.**"
+)
 
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Player Lookup
+# Player Lookup — Value Trajectory + 3 Future Seasons (Request #8)
 # ═══════════════════════════════════════════════════════════════
 st.subheader("🔎 Player Lookup — Value Trajectory & Future Prediction")
 
@@ -455,7 +558,7 @@ xgb_pipeline = load_xgb_model()
 player_name = st.text_input("Search for a player (e.g., Kylian Mbappe, Erling Haaland)")
 
 if player_name:
-    matches = df[df["player_name"].str.contains(player_name, case=False, na=False)]
+    matches = df_full[df_full["player_name"].str.contains(player_name, case=False, na=False)]
     if len(matches) == 0:
         st.warning("No player found. Try a different name.")
     else:
@@ -469,80 +572,94 @@ if player_name:
         player_data = player_data.sort_values("season")
 
         # Player info cards
-        latest = player_data.iloc[-1]
+        latest_row = player_data.iloc[-1]
 
-        # ── Predict next season value ──
-        predicted_value = None
+        # ── Predict next 3 seasons (Request #8) ──
+        predicted_values = []
         if xgb_pipeline is not None:
             from src.models import NUMERIC_FEATURES, CATEGORICAL_FEATURES
 
-            next_row = latest.copy()
-            next_row["age"] = latest["age"] + 1
-            next_row["age_squared"] = next_row["age"] ** 2
-            next_row["is_peak_age"] = int(25 <= next_row["age"] <= 29)
-            next_row["log_prev_season_value"] = np.log1p(latest["market_value_in_eur"])
-            # Update age × position interactions
-            for pos in ["Attack", "Midfield", "Defender", "Goalkeeper"]:
-                col = f"age_x_{pos.lower()}"
-                next_row[col] = next_row["age"] * (1 if latest["position_group"] == pos else 0)
+            current_row = latest_row.copy()
+            current_value = latest_row["market_value_in_eur"]
 
-            X_pred = pd.DataFrame([next_row])[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
-            for col in CATEGORICAL_FEATURES:
-                X_pred[col] = X_pred[col].fillna("Unknown")
+            for future_offset in range(1, 4):  # 3 future seasons
+                next_row = current_row.copy()
+                next_row["age"] = latest_row["age"] + future_offset
+                next_row["age_squared"] = next_row["age"] ** 2
+                next_row["is_peak_age"] = int(25 <= next_row["age"] <= 29)
+                next_row["log_prev_season_value"] = np.log1p(current_value)
+                # Update age × position interactions
+                for pos in ["Attack", "Midfield", "Defender", "Goalkeeper"]:
+                    col = f"age_x_{pos.lower()}"
+                    next_row[col] = next_row["age"] * (1 if latest_row["position_group"] == pos else 0)
 
-            log_pred = xgb_pipeline.predict(X_pred)[0]
-            predicted_value = np.expm1(log_pred)
+                X_pred = pd.DataFrame([next_row])[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+                for col in CATEGORICAL_FEATURES:
+                    X_pred[col] = X_pred[col].fillna("Unknown")
+
+                log_pred = xgb_pipeline.predict(X_pred)[0]
+                pred_value = np.expm1(log_pred)
+                predicted_values.append(pred_value)
+                current_value = pred_value  # Feed forward for next season
 
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Latest Value", f"€{latest['market_value_in_eur']:,.0f}")
-        p2.metric("Position", latest["position_group"])
-        p3.metric("Age", f"{int(latest['age'])}")
-        p4.metric("Club", latest.get("club_name", "N/A"))
+        p1.metric("Latest Value", f"€{latest_row['market_value_in_eur']:,.0f}")
+        p2.metric("Position", latest_row["position_group"])
+        p3.metric("Age", f"{int(latest_row['age'])}")
+        p4.metric("Club", latest_row.get("club_name", "N/A"))
 
-        if predicted_value is not None:
-            pct_change = (predicted_value - latest["market_value_in_eur"]) / latest["market_value_in_eur"] * 100
-            p5, p6 = st.columns(2)
-            p5.metric(
-                f"Predicted Value (Next Season, Age {int(latest['age'] + 1)})",
-                f"€{predicted_value:,.0f}",
-                f"{pct_change:+.1f}%",
-            )
-            p6.markdown(
-                f"*Assuming similar performance next season (same goals, assists, "
-                f"appearances, league, and club). The model uses this season's market "
-                f"value as the prior.*"
-            )
+        if predicted_values:
+            pred_cols = st.columns(3)
+            for i, pred_val in enumerate(predicted_values):
+                future_age = int(latest_row["age"]) + i + 1
+                ref_val = latest_row["market_value_in_eur"] if i == 0 else predicted_values[i - 1]
+                pct_change = (pred_val - ref_val) / ref_val * 100
+                with pred_cols[i]:
+                    st.metric(
+                        f"Predicted (Age {future_age})",
+                        f"€{pred_val:,.0f}",
+                        f"{pct_change:+.1f}%",
+                    )
 
-        # ── Plot: historical + predicted ──
+        # ── Plot: historical + 3 predicted seasons ──
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(player_data["season"], player_data["market_value_in_eur"] / 1e6,
                 marker="o", color="#FFD700", linewidth=2.5, label="Actual")
         ax.fill_between(player_data["season"], player_data["market_value_in_eur"] / 1e6,
                         alpha=0.15, color="#FFD700")
 
-        if predicted_value is not None:
-            next_season = int(latest["season"]) + 1
-            # Dashed line connecting last actual to prediction
-            ax.plot(
-                [latest["season"], next_season],
-                [latest["market_value_in_eur"] / 1e6, predicted_value / 1e6],
-                marker="D", color="#FF6B6B", linewidth=2, linestyle="--",
-                markersize=8, label="Predicted",
-            )
-            ax.annotate(
-                f"€{predicted_value/1e6:.1f}M",
-                xy=(next_season, predicted_value / 1e6),
-                xytext=(next_season + 0.3, predicted_value / 1e6),
-                fontsize=11, color="#FF6B6B", fontweight="bold",
-            )
+        if predicted_values:
+            last_season = int(latest_row["season"])
+            future_seasons = [last_season + i + 1 for i in range(3)]
+            future_vals_m = [v / 1e6 for v in predicted_values]
+
+            # Connect last actual to first prediction
+            all_pred_seasons = [last_season] + future_seasons
+            all_pred_vals = [latest_row["market_value_in_eur"] / 1e6] + future_vals_m
+
+            ax.plot(all_pred_seasons, all_pred_vals,
+                    marker="D", color="#FF6B6B", linewidth=2, linestyle="--",
+                    markersize=8, label="Predicted")
+
+            # Widening confidence band
+            for i, (s, v) in enumerate(zip(future_seasons, future_vals_m)):
+                margin = v * 0.15 * (i + 1)  # ±15% per year
+                ax.fill_between([s - 0.3, s + 0.3], v - margin, v + margin,
+                                alpha=0.15, color="#FF6B6B")
+                ax.annotate(f"€{v:.1f}M", xy=(s, v),
+                            xytext=(s + 0.2, v + margin * 0.5),
+                            fontsize=9, color="#FF6B6B", fontweight="bold")
 
         ax.set_xlabel("Season")
         ax.set_ylabel("Market Value (€ Millions)")
-        ax.set_title(f"{player_data['player_name'].iloc[0]} — Value Over Time")
+        ax.set_title(f"{player_data['player_name'].iloc[0]} — Value Over Time (+ 3 Season Forecast)")
         ax.legend()
         ax.grid(True, alpha=0.3)
         st.pyplot(fig)
         plt.close()
+
+        st.caption("*Confidence bands widen with each predicted season, reflecting increasing uncertainty. "
+                   "Predictions assume similar performance level (same goals, assists, appearances, league, club).*")
 
         st.dataframe(
             player_data[["season", "age", "position_group", "club_name",

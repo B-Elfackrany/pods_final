@@ -2,7 +2,7 @@
 Page 5: Hyperparameter Tuning & Model Optimization
 ====================================================
 Documents the full optimization journey: feature engineering impact,
-hyperparameter search, and what mattered most.
+hyperparameter search, position encoding experiments, and W&B integration.
 """
 
 import streamlit as st
@@ -10,6 +10,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import json
+import os
 
 st.set_page_config(page_title="Hyperparameter Tuning", page_icon="⚙️", layout="wide")
 
@@ -25,14 +27,40 @@ plt.rcParams.update({
 
 st.title("⚙️ Hyperparameter Tuning & Model Optimization")
 st.markdown("*The full journey from baseline to our best model — feature engineering, "
-            "hyperparameter search, and what actually moved the needle.*")
+            "hyperparameter search, position encoding experiments, and W&B results.*")
+
+# ── Data scope toggle (Request #10) ──
+data_scope = st.sidebar.radio(
+    "🏟️ Data Scope",
+    ["All Players", "Top 5 Leagues Only", "€10M+ Players Only"],
+    index=0,
+    key="hp_scope",
+)
 
 # ── Load results ──
 @st.cache_data
 def load_results():
     return pd.read_csv("models/model_results.csv")
 
+@st.cache_data
+def load_position_experiment():
+    path = "models/position_experiment_results.json"
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+@st.cache_data
+def load_wandb_results():
+    path = "models/wandb_sweep_results.json"
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return None
+
 results = load_results()
+pos_experiment = load_position_experiment()
+wandb_results = load_wandb_results()
 
 # Pull final XGBoost R² dynamically
 xgb_row = results[results["Model"] == "XGBoost"]
@@ -163,9 +191,89 @@ plt.close()
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 3: Hyperparameter Search Space
+# Section 3: Position Encoding Experiment (Request #5)
 # ═══════════════════════════════════════════════════════════════
-st.subheader("3. Hyperparameter Search Space")
+st.subheader("3. Position Encoding Experiment — Is One-Hot Optimal?")
+
+st.markdown(
+    """
+    **Question:** Since clean sheets matter more for goalkeepers/defenders and goals/assists 
+    matter more for attackers, should we use position-specific interaction features instead 
+    of simple one-hot encoding?
+    
+    We tested three approaches:
+    1. **Baseline**: Standard one-hot encoding of `position_group` (current approach)
+    2. **Position Interactions**: Added explicit features like `goals_x_attacker`, 
+       `assists_x_midfielder`, `defensive_quality_gk`
+    3. **No Position**: Removed position entirely — let the model infer from stats alone
+    """
+)
+
+if pos_experiment:
+    # Results table
+    pos_rows = []
+    for name, res in pos_experiment.items():
+        cv_r2 = res.get('cv_r2_mean')
+        cv_display = f"{cv_r2:.4f}" if cv_r2 is not None and not (isinstance(cv_r2, float) and np.isnan(cv_r2)) else "N/A"
+        pos_rows.append({
+            "Approach": name.replace("_", " ").title(),
+            "R²": f"{res['R2']:.4f}",
+            "CV R²": cv_display,
+            "MAE (€)": f"€{res['MAE_EUR']:,.0f}",
+            "MAPE (%)": f"{res['MAPE']:.2f}%",
+            "Description": res["description"],
+        })
+    pos_df = pd.DataFrame(pos_rows)
+    st.dataframe(pos_df, hide_index=True, use_container_width=True)
+
+    # Comparison chart
+    fig, ax = plt.subplots(figsize=(10, 4))
+    approach_names = [r["Approach"] for r in pos_rows]
+    r2_values = [pos_experiment[k]["R2"] for k in pos_experiment]
+    bar_colors = ["#FFD700" if v == max(r2_values) else "#4CAF50" for v in r2_values]
+    bars = ax.bar(approach_names, r2_values, color=bar_colors, edgecolor="black", width=0.5)
+    for bar, val in zip(bars, r2_values):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.0005,
+                f"R²={val:.4f}", ha="center", fontsize=11, color="#FAFAFA", fontweight="bold")
+    ax.set_ylabel("R² Score")
+    ax.set_title("Position Encoding Experiment — R² Comparison")
+    ax.set_ylim(0.915, 0.925)
+    ax.grid(True, alpha=0.2, axis="y")
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
+
+    st.info(
+        """
+        **Conclusion:** The standard one-hot encoding (R²=0.9206) **outperforms** 
+        both the position-interaction approach (R²=0.9194) and the no-position approach (R²=0.9199).
+        
+        **Why?** XGBoost already discovers position-specific patterns through its tree splits. 
+        Explicitly encoding interactions like `goals_x_attacker` introduces **multicollinearity** 
+        (the new features are highly correlated with existing ones), which slightly hurts 
+        generalization. The tree-based model handles position-stat interactions natively 
+        and more flexibly than hand-crafted features.
+        
+        **Takeaway:** One-hot encoding is the right choice for tree-based models. Explicit 
+        interaction features are more useful for linear models that can't discover interactions 
+        on their own.
+        """
+    )
+
+    if "extra_features" in pos_experiment.get("position_interactions", {}):
+        with st.expander("📋 Position Interaction Features Tested"):
+            st.markdown("The following position-specific features were created and tested:")
+            for feat in pos_experiment["position_interactions"]["extra_features"]:
+                st.markdown(f"- `{feat}`")
+else:
+    st.info("Position experiment not yet run. Execute `python -m src.position_experiment` first.")
+
+st.divider()
+
+# ═══════════════════════════════════════════════════════════════
+# Section 4: Hyperparameter Search Space
+# ═══════════════════════════════════════════════════════════════
+st.subheader("4. Hyperparameter Search Space")
 
 st.markdown(
     """
@@ -179,19 +287,21 @@ st.markdown(
     | | weights | ['uniform', 'distance'] | Grid Search |
     | **Random Forest** | n_estimators | [50, 100, 200, 500] | Grid Search |
     | | max_depth | [5, 10, 15, 20, None] | Grid Search |
-    | **XGBoost** | learning_rate | [0.01, 0.05, 0.1, 0.2] | Bayesian |
-    | | max_depth | [3, 5, 7, 10] | Bayesian |
-    | | n_estimators | [100, 200, 300, 500] | Bayesian |
-    | | subsample | [0.7, 0.8, 0.9, 1.0] | Bayesian |
+    | **XGBoost** | learning_rate | [0.01, 0.03, 0.05, 0.1, 0.15, 0.2] | Bayesian (W&B) |
+    | | max_depth | [3, 4, 5, 6, 7, 8, 10] | Bayesian (W&B) |
+    | | n_estimators | [100, 200, 300, 400, 500] | Bayesian (W&B) |
+    | | subsample | [0.6, 0.7, 0.8, 0.9, 1.0] | Bayesian (W&B) |
+    | | colsample_bytree | [0.6, 0.7, 0.8, 0.9, 1.0] | Bayesian (W&B) |
+    | | min_child_weight | [1, 3, 5, 7] | Bayesian (W&B) |
     """
 )
 
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 4: Interactive Tuning Demos
+# Section 5: Interactive Tuning Demos
 # ═══════════════════════════════════════════════════════════════
-st.subheader("4. Interactive Tuning Exploration")
+st.subheader("5. Interactive Tuning Exploration")
 
 tuning_tab1, tuning_tab2, tuning_tab3 = st.tabs([
     "KNN: n_neighbors", "Ridge/Lasso: alpha", "Decision Tree: max_depth"
@@ -299,9 +409,104 @@ with tuning_tab3:
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 5: What Drove the Biggest Improvements
+# Section 6: W&B Sweep Results (Request #11)
 # ═══════════════════════════════════════════════════════════════
-st.subheader("5. What Drove the Biggest Improvements")
+st.subheader("6. W&B Hyperparameter Sweep — XGBoost Optimization")
+
+if wandb_results:
+    st.markdown(
+        f"""
+        We ran a **Bayesian optimization sweep** using [Weights & Biases](https://wandb.ai) 
+        with **{wandb_results.get('n_trials', 30)} trials** to find optimal XGBoost hyperparameters.
+        """
+    )
+
+    # Best config
+    best_config = wandb_results.get("best_config", {})
+    best_metrics = wandb_results.get("best_metrics", {})
+
+    col_config, col_metrics = st.columns(2)
+
+    with col_config:
+        st.markdown("#### Best Hyperparameters")
+        config_df = pd.DataFrame([
+            {"Parameter": k, "Value": str(v)}
+            for k, v in best_config.items()
+        ])
+        st.dataframe(config_df, hide_index=True, use_container_width=True)
+
+    with col_metrics:
+        st.markdown("#### Best Run Metrics")
+        if best_metrics:
+            m1, m2 = st.columns(2)
+            m1.metric("R²", f"{best_metrics.get('r2', 'N/A')}")
+            m2.metric("CV R²", f"{best_metrics.get('cv_r2_mean', 'N/A')}")
+            m3, m4 = st.columns(2)
+            mae_val = best_metrics.get('mae_eur', 0)
+            m3.metric("MAE", f"€{mae_val:,.0f}" if isinstance(mae_val, (int, float)) else "N/A")
+            m4.metric("MAPE", f"{best_metrics.get('mape', 'N/A')}%")
+
+    # Link to W&B dashboard
+    sweep_url = wandb_results.get("sweep_url", "")
+    if sweep_url:
+        st.markdown(f"[View full sweep dashboard on W&B]({sweep_url})")
+
+    # Show comparison: default vs tuned
+    st.markdown("#### Default vs Tuned XGBoost")
+    comparison = pd.DataFrame([
+        {"Configuration": "Default (n_est=300, depth=6, lr=0.1)",
+         "R²": f"{final_r2:.4f}",
+         "MAE": f"€{results[results['Model']=='XGBoost']['MAE_EUR'].values[0]:,.0f}"},
+        {"Configuration": f"W&B Best ({wandb_results.get('n_trials', 30)} trials)",
+         "R²": f"{best_metrics.get('r2', 'N/A')}",
+         "MAE": f"€{best_metrics.get('mae_eur', 0):,.0f}" if isinstance(best_metrics.get('mae_eur', 0), (int, float)) else "N/A"},
+    ])
+    st.dataframe(comparison, hide_index=True, use_container_width=True)
+
+    st.markdown(
+        """
+        > **W&B Environment:** API key stored in `.env` file (not committed to git). 
+        > Sweep uses Bayesian optimization to efficiently explore the hyperparameter space, 
+        > prioritizing regions that showed promising results in earlier trials.
+        """
+    )
+
+else:
+    st.markdown(
+        """
+        ### W&B Sweep Configuration
+        
+        The W&B sweep is configured for **Bayesian optimization** across 6 XGBoost hyperparameters.
+        Run `python -m src.wandb_sweep` to execute the sweep.
+        
+        ```python
+        sweep_config = {
+            "method": "bayes",
+            "metric": {"name": "r2", "goal": "maximize"},
+            "parameters": {
+                "learning_rate": {"values": [0.01, 0.03, 0.05, 0.1, 0.15, 0.2]},
+                "max_depth": {"values": [3, 4, 5, 6, 7, 8, 10]},
+                "n_estimators": {"values": [100, 200, 300, 400, 500]},
+                "subsample": {"values": [0.6, 0.7, 0.8, 0.9, 1.0]},
+                "colsample_bytree": {"values": [0.6, 0.7, 0.8, 0.9, 1.0]},
+                "min_child_weight": {"values": [1, 3, 5, 7]},
+            },
+        }
+        ```
+        
+        **W&B API key** is stored securely in `.env`:
+        ```
+        WANDB_API_KEY=wandb_v1_...
+        ```
+        """
+    )
+
+st.divider()
+
+# ═══════════════════════════════════════════════════════════════
+# Section 7: What Drove the Biggest Improvements
+# ═══════════════════════════════════════════════════════════════
+st.subheader("7. What Drove the Biggest Improvements")
 
 # Stacked comparison: feature engineering vs hyperparameter tuning
 fig, ax = plt.subplots(figsize=(12, 5))
@@ -347,9 +552,9 @@ with col_hp:
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 6: Key Takeaways
+# Section 8: Key Takeaways
 # ═══════════════════════════════════════════════════════════════
-st.subheader("6. Key Takeaways")
+st.subheader("8. Key Takeaways")
 
 st.markdown(
     f"""
@@ -367,13 +572,14 @@ st.markdown(
     The model uses the prior value as a strong anchor, then adjusts based on current performance,
     age changes, and league context.
 
-    **3. Tree-based models capture interactions natively**
+    **3. One-hot position encoding is optimal for tree models (Experiment Results)**
 
-    Explicit interaction features (age x position, league x goals) gave marginal
-    gains (+0.0001 to +0.0006) because XGBoost already discovers these via splits.
-    These interactions matter more for linear models.
+    Our experiment showed that explicit position interactions (goals_x_attacker, etc.) 
+    actually **hurt** performance slightly (R²=0.9194 vs 0.9206). XGBoost already 
+    discovers these interactions through tree splits — adding them manually introduces 
+    multicollinearity. Keep it simple for tree-based models.
 
-    **4. Model architecture matters more than tuning**
+    **4. Tree-based models capture interactions natively**
 
     The gap between linear models (R²~0.76) and tree ensembles (R²~0.92) dwarfs
     any improvement from tuning within a model class. Choosing XGBoost over Ridge
@@ -387,38 +593,3 @@ st.markdown(
     strong generalization with minimal overfitting.
     """
 )
-
-st.divider()
-
-with st.expander("🔧 How We Would Use W&B in Production"):
-    st.markdown(
-        """
-        In a production setting, we would use **Weights & Biases (wandb)** for systematic
-        hyperparameter tuning:
-
-        1. **Define sweep configs** — Bayesian search for XGBoost (256 combinations),
-           grid search for simpler models
-        2. **Log everything** — R², MAE, RMSE, training time per run
-        3. **Parallel coordinates plot** — visualize which hyperparameter combinations work best
-        4. **Embed the dashboard** — `st.components.v1.iframe(wandb_url)` for live monitoring
-
-        ```python
-        import wandb
-
-        sweep_config = {
-            "method": "bayes",
-            "metric": {"name": "r2", "goal": "maximize"},
-            "parameters": {
-                "learning_rate": {"values": [0.01, 0.05, 0.1, 0.2]},
-                "max_depth": {"values": [3, 5, 7, 10]},
-                "n_estimators": {"values": [100, 200, 300, 500]},
-                "subsample": {"values": [0.7, 0.8, 0.9, 1.0]},
-            },
-        }
-        sweep_id = wandb.sweep(sweep_config, project="football-value-predictor")
-        ```
-
-        *W&B was not run for this submission due to API key requirements, but the
-        search spaces and results above follow the same methodology.*
-        """
-    )

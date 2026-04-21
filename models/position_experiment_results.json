@@ -1,0 +1,43 @@
+{
+  "baseline_onehot": {
+    "R2": 0.9206,
+    "MAE_EUR": 1378285.0,
+    "RMSE_EUR": 3448751.0,
+    "MAPE": 31.87,
+    "cv_r2_mean": 0.9212,
+    "cv_r2_std": 0.0014,
+    "training_time": 2.12,
+    "description": "Standard one-hot encoding for position_group (current approach)"
+  },
+  "position_interactions": {
+    "R2": 0.9194,
+    "MAE_EUR": 1391010.0,
+    "RMSE_EUR": 3477974.0,
+    "MAPE": 32.26,
+    "cv_r2_mean": 0.9208,
+    "cv_r2_std": 0.0013,
+    "training_time": 2.26,
+    "description": "One-hot + position-specific interaction features (goals_x_attacker, etc.)",
+    "extra_features": [
+      "goals_x_attacker",
+      "goals_x_midfielder",
+      "goals_x_defender",
+      "assists_x_midfielder",
+      "assists_x_attacker",
+      "defensive_quality_def",
+      "defensive_quality_gk",
+      "minutes_x_gk",
+      "yellows_x_defender"
+    ]
+  },
+  "no_position": {
+    "R2": 0.9199,
+    "MAE_EUR": 1390168.0,
+    "RMSE_EUR": 3492230.0,
+    "MAPE": 32.11,
+    "cv_r2_mean": NaN,
+    "cv_r2_std": NaN,
+    "training_time": 1.64,
+    "description": "Position removed entirely \u2014 model uses only stats and context"
+  }
+}
