@@ -1,3 +1,14 @@
+---
+title: Football Player Market Value Predictor
+emoji: "\u26BD"
+colorFrom: green
+colorTo: blue
+sdk: streamlit
+sdk_version: "1.30.0"
+app_file: app.py
+pinned: false
+---
+
 # Football Player Market Value Predictor
 
 A machine learning web application that predicts football (soccer) player market values using the Transfermarkt dataset. Built as a university group project for a Data Management and Analysis course.
@@ -36,11 +47,11 @@ pods_final/
 │   └── shap_analysis.py            # Pre-compute SHAP values
 │
 ├── pages/
-│   ├── 1_🏠_Business_Case.py
-│   ├── 2_📊_Visualizations.py     # 11 charts + player lookup with prediction
-│   ├── 3_🔮_Predictions.py        # Model comparison + interactive predictor
-│   ├── 4_🧠_Explainability.py     # SHAP analysis
-│   └── 5_⚙️_Hyperparameter_Tuning.py
+│   ├── 1_Business_Case.py
+│   ├── 2_Visualizations.py        # 11 charts + player lookup with prediction
+│   ├── 3_Predictions.py           # Model comparison + interactive predictor
+│   ├── 4_Explainability.py        # SHAP analysis
+│   └── 5_Hyperparameter_Tuning.py
 │
 ├── data/
 │   ├── *.csv                       # Raw Transfermarkt CSVs (from Kaggle)

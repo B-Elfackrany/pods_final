@@ -33,12 +33,7 @@ st.title("📊 Data Visualization & Insights")
 def load_features():
     return pd.read_parquet("data/processed/features.parquet")
 
-@st.cache_data
-def load_transfers():
-    return pd.read_csv("data/transfers.csv", low_memory=False)
-
 df_full = load_features()
-transfers = load_transfers()
 
 # ── Sidebar filters ──
 st.sidebar.subheader("🎛️ Filters")

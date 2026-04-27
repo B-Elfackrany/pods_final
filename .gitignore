@@ -1,7 +1,8 @@
-*.csv
+data/*.csv
 *.zip
 .env
 __pycache__/
+*.pyc
 wandb/
 *.log
 AGENT_PROMPT.md

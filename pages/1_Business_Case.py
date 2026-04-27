@@ -44,16 +44,7 @@ st.divider()
 def load_features():
     return pd.read_parquet("data/processed/features.parquet")
 
-@st.cache_data
-def load_raw_tables():
-    tables = {}
-    for name in ["players", "appearances", "player_valuations", "games",
-                  "competitions", "clubs", "transfers"]:
-        tables[name] = pd.read_csv(f"data/{name}.csv", low_memory=False)
-    return tables
-
 df_full = load_features()
-raw = load_raw_tables()
 
 # Apply scope filter
 if data_scope == "Top 5 Leagues Only":
@@ -68,13 +59,13 @@ st.subheader("📈 Dataset at a Glance")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Players", f"{df['player_id'].nunique():,}")
 c2.metric("Player-Seasons", f"{len(df):,}")
-c3.metric("Competitions", f"{raw['competitions']['name'].nunique()}")
-c4.metric("Seasons", f"{df['season'].min()}–{df['season'].max()}")
+c3.metric("Competitions", "64")
+c4.metric("Seasons", f"{int(df['season'].min())}–{int(df['season'].max())}")
 
 c5, c6, c7, c8 = st.columns(4)
-c5.metric("Total Appearances", f"{len(raw['appearances']):,}")
-c6.metric("Total Transfers", f"{len(raw['transfers']):,}")
-c7.metric("Clubs", f"{raw['clubs']['club_id'].nunique()}")
+c5.metric("Total Appearances", "1,862,208")
+c6.metric("Total Transfers", "157,186")
+c7.metric("Clubs", "796")
 c8.metric("Avg Market Value", f"€{df['market_value_in_eur'].mean():,.0f}")
 
 st.divider()
