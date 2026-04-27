@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.graph_objects as go
 import joblib
 import json
 import os
@@ -27,7 +28,7 @@ plt.rcParams.update({
 
 st.title("🔮 Predictions")
 
-# ── Data scope toggle (Request #10) ──
+# ── Data scope toggle ──
 TOP5_IDS = {"GB1", "ES1", "IT1", "L1", "FR1"}
 data_scope = st.sidebar.radio(
     "🏟️ Data Scope",
@@ -76,12 +77,30 @@ elif data_scope == "€10M+ Players Only":
     if "market_value_in_eur" in predictions.columns:
         predictions = predictions[predictions["market_value_in_eur"] >= 10_000_000]
 
-# Build model MAE lookup for error estimates (Request #2)
+# Build model MAE lookup for error estimates
 model_mae = dict(zip(results["Model"], results["MAE_EUR"]))
 
 # ═══════════════════════════════════════════════════════════════
 # Section 1: Model Comparison
 # ═══════════════════════════════════════════════════════════════
+# ── Data split info ──
+df_features = load_features()
+total_eligible = len(df_features[df_features["total_minutes"] >= 450].dropna(
+    subset=["log_market_value"]))
+test_size = len(predictions_raw)
+train_size = total_eligible - test_size
+train_pct = train_size / total_eligible * 100
+test_pct = test_size / total_eligible * 100
+
+split_cols = st.columns(4)
+split_cols[0].metric("Total Eligible Records", f"{total_eligible:,}")
+split_cols[1].metric("Training Set", f"{train_size:,} ({train_pct:.0f}%)")
+split_cols[2].metric("Test Set", f"{test_size:,} ({test_pct:.0f}%)")
+split_cols[3].metric("Split Strategy", "80/20 Stratified")
+st.caption("Split is stratified by position group to ensure balanced representation. "
+           "Only players with 450+ minutes are included.")
+st.divider()
+
 st.subheader("📊 Model Comparison")
 
 # Format results for display
@@ -146,19 +165,53 @@ col_a, col_b = st.columns(2)
 with col_a:
     y_true_eur = np.expm1(predictions["y_true_log"])
     y_pred_eur = np.expm1(predictions[pred_col])
-
-    fig, ax = plt.subplots(figsize=(7, 7))
-    ax.scatter(y_true_eur / 1e6, y_pred_eur / 1e6, alpha=0.2, s=5, color="#FFD700")
     max_val = max(y_true_eur.max(), y_pred_eur.max()) / 1e6
-    ax.plot([0, max_val], [0, max_val], "r--", linewidth=2, label="Perfect Prediction")
-    ax.set_xlabel("Actual Value (€ Millions)")
-    ax.set_ylabel("Predicted Value (€ Millions)")
-    ax.set_title(f"{selected_model} — Predicted vs Actual")
-    ax.legend()
-    ax.set_xlim(0, min(max_val, 200))
-    ax.set_ylim(0, min(max_val, 200))
-    st.pyplot(fig)
-    plt.close()
+    axis_max = min(max_val, 200)
+
+    # Build hover text with player info
+    hover_texts = []
+    for idx in predictions.index:
+        row = predictions.loc[idx]
+        name = row.get("player_name", "Unknown")
+        actual = np.expm1(row["y_true_log"])
+        predicted = np.expm1(row[pred_col])
+        hover_texts.append(
+            f"<b>{name}</b><br>"
+            f"Actual: €{actual/1e6:.1f}M<br>"
+            f"Predicted: €{predicted/1e6:.1f}M<br>"
+            f"Diff: €{(predicted - actual)/1e6:+.1f}M"
+        )
+
+    fig_scatter = go.Figure()
+    fig_scatter.add_trace(go.Scattergl(
+        x=y_true_eur / 1e6, y=y_pred_eur / 1e6,
+        mode="markers",
+        marker=dict(size=4, color="#FFD700", opacity=0.4),
+        text=hover_texts,
+        hoverinfo="text",
+        name="Players",
+    ))
+    fig_scatter.add_trace(go.Scatter(
+        x=[0, axis_max], y=[0, axis_max],
+        mode="lines",
+        line=dict(color="red", dash="dash", width=2),
+        name="Perfect Prediction",
+        hoverinfo="skip",
+    ))
+    fig_scatter.update_layout(
+        title=f"{selected_model} — Predicted vs Actual",
+        xaxis_title="Actual Value (€ Millions)",
+        yaxis_title="Predicted Value (€ Millions)",
+        xaxis=dict(range=[0, axis_max]),
+        yaxis=dict(range=[0, axis_max]),
+        template="plotly_dark",
+        paper_bgcolor="#0E1117",
+        plot_bgcolor="#1B3A2D",
+        height=500,
+        showlegend=True,
+        legend=dict(x=0.02, y=0.98),
+    )
+    st.plotly_chart(fig_scatter, use_container_width=True)
 
 with col_b:
     # Residuals distribution
@@ -170,7 +223,7 @@ with col_b:
     ax.set_ylabel("Count")
     ax.set_title(f"{selected_model} — Residuals Distribution")
 
-    # Add error stats (Request #2)
+    # Add error stats
     mae_val = np.mean(np.abs(residuals_eur))
     median_err = np.median(np.abs(residuals_eur))
     ax.annotate(f"MAE: €{mae_val:.1f}M\nMedian: €{median_err:.1f}M",
@@ -196,7 +249,7 @@ with st.expander("💡 Why Linear Models Have Higher RMSE"):
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 3: Interactive Prediction Tool (Request #2 — error estimates)
+# Section 3: Interactive Prediction Tool
 # ═══════════════════════════════════════════════════════════════
 st.subheader("🎮 Interactive Prediction Tool")
 st.markdown("*Adjust the sliders to estimate a player's market value:*")
@@ -220,6 +273,40 @@ with col3:
     pred_height = st.slider("Height (cm)", 160, 205, 180)
     pred_stadium = st.slider("Club Stadium Seats", 5000, 100000, 30000, step=5000)
     pred_confederation = st.selectbox("Confederation", ["UEFA", "CONMEBOL/CONCACAF", "AFC", "CAF", "Other"])
+
+st.markdown("##### Prior Valuation & Transfer History")
+st.caption("The previous season's market value is the single most predictive feature — "
+           "it tells the model the player's established reputation. Set to €0 for unknown/youth players.")
+pcol1, pcol2, pcol3 = st.columns(3)
+with pcol1:
+    prev_value_options = {
+        "Unknown / Youth Player": 0,
+        "€500K (Lower league regular)": 500_000,
+        "€2M (Mid-table starter)": 2_000_000,
+        "€5M (Good domestic league player)": 5_000_000,
+        "€10M (Top league squad player)": 10_000_000,
+        "€20M (Established top-league starter)": 20_000_000,
+        "€40M (National team regular)": 40_000_000,
+        "€60M (Elite — top scorer/playmaker)": 60_000_000,
+        "€80M (World-class)": 80_000_000,
+        "€100M+ (Ballon d'Or contender)": 100_000_000,
+    }
+    prev_value_label = st.selectbox("Previous Season Market Value", list(prev_value_options.keys()), index=0)
+    pred_prev_value = prev_value_options[prev_value_label]
+with pcol2:
+    pred_num_transfers = st.slider("Number of Career Transfers", 0, 10, 2)
+with pcol3:
+    prev_fee_options = {
+        "€0 (Free / Academy)": 0,
+        "€1M": 1_000_000,
+        "€5M": 5_000_000,
+        "€15M": 15_000_000,
+        "€30M": 30_000_000,
+        "€50M": 50_000_000,
+        "€80M+": 80_000_000,
+    }
+    prev_fee_label = st.selectbox("Highest Previous Transfer Fee", list(prev_fee_options.keys()), index=0)
+    pred_highest_fee = prev_fee_options[prev_fee_label]
 
 if st.button("⚽ Predict Market Value", type="primary", use_container_width=True):
     # Build feature vector
@@ -248,10 +335,10 @@ if st.button("⚽ Predict Market Value", type="primary", use_container_width=Tru
         "minutes_per_goal_involvement": minutes_safe / goal_inv if goal_inv > 0 else 9999,
         "goal_involvement_per_app": goal_inv / pred_appearances if pred_appearances > 0 else 0,
         "goal_involvement_x_league": goal_inv * (1 if pred_league == "Top 5 League" else 0),
-        "num_transfers": 2,
-        "highest_previous_fee": 0,
-        "total_transfer_fees": 0,
-        "log_prev_season_value": 0,
+        "num_transfers": pred_num_transfers,
+        "highest_previous_fee": pred_highest_fee,
+        "total_transfer_fees": pred_highest_fee,
+        "log_prev_season_value": np.log1p(pred_prev_value),
         "position_group": pred_position,
         "foot": pred_foot,
         "confederation": pred_confederation,
@@ -286,7 +373,7 @@ if st.button("⚽ Predict Market Value", type="primary", use_container_width=Tru
                 eur_pred = np.expm1(log_pred)
                 predictions_live[display_name] = eur_pred
 
-                # Get error margin from model MAE (Request #2)
+                # Get error margin from model MAE
                 mae = model_mae.get(display_name, 0)
 
                 with pred_cols_display[i % len(pred_cols_display)]:
@@ -317,7 +404,7 @@ if st.button("⚽ Predict Market Value", type="primary", use_container_width=Tru
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 4: Undervalued & Overvalued Players — 2025 ONLY (Request #9)
+# Section 4: Undervalued & Overvalued Players (Latest Season)
 # ═══════════════════════════════════════════════════════════════
 st.subheader("💎 Most Undervalued & Overvalued Players (Latest Season)")
 st.markdown("*Players from the latest season where XGBoost predictions diverge most from actual market value.*")
@@ -334,7 +421,7 @@ if xgb_col:
         undervalued["diff_eur"] / undervalued["actual_eur"] * 100
     )
 
-    # Filter to latest season ONLY (Request #9)
+    # Filter to latest season only
     if "season" in undervalued.columns:
         latest_season = undervalued["season"].max()
         undervalued = undervalued[undervalued["season"] == latest_season]

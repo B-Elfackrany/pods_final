@@ -26,7 +26,7 @@ plt.rcParams.update({
 
 st.title("🧠 Explainability — What Drives Player Value?")
 
-# ── Data scope toggle (Request #10) ──
+# ── Data scope toggle ──
 data_scope = st.sidebar.radio(
     "🏟️ Data Scope",
     ["All Players", "Top 5 Leagues Only", "€10M+ Players Only"],

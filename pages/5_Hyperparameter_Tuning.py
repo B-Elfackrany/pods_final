@@ -29,7 +29,7 @@ st.title("⚙️ Hyperparameter Tuning & Model Optimization")
 st.markdown("*The full journey from baseline to our best model — feature engineering, "
             "hyperparameter search, position encoding experiments, and W&B results.*")
 
-# ── Data scope toggle (Request #10) ──
+# ── Data scope toggle ──
 data_scope = st.sidebar.radio(
     "🏟️ Data Scope",
     ["All Players", "Top 5 Leagues Only", "€10M+ Players Only"],
@@ -191,7 +191,7 @@ plt.close()
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 3: Position Encoding Experiment (Request #5)
+# Section 3: Position Encoding Experiment
 # ═══════════════════════════════════════════════════════════════
 st.subheader("3. Position Encoding Experiment — Is One-Hot Optimal?")
 
@@ -409,7 +409,7 @@ with tuning_tab3:
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Section 6: W&B Sweep Results (Request #11)
+# Section 6: W&B Sweep Results
 # ═══════════════════════════════════════════════════════════════
 st.subheader("6. W&B Hyperparameter Sweep — XGBoost Optimization")
 
@@ -581,7 +581,7 @@ st.markdown(
 
     **4. Tree-based models capture interactions natively**
 
-    The gap between linear models (R²~0.76) and tree ensembles (R²~0.92) dwarfs
+    The gap between linear models (R² ≈ 0.76) and tree ensembles (R² ≈ 0.92) dwarfs
     any improvement from tuning within a model class. Choosing XGBoost over Ridge
     was a +0.16 R² decision.
 

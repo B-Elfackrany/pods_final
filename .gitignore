@@ -3,3 +3,7 @@ data/
 .env
 __pycache__/
 wandb/
+*.log
+AGENT_PROMPT.md
+PROJECT_PLAN.md
+.claude/

@@ -43,7 +43,7 @@ transfers = load_transfers()
 # ── Sidebar filters ──
 st.sidebar.subheader("🎛️ Filters")
 
-# ── Data scope toggle (Request #10) ──
+# ── Data scope toggle ──
 TOP5_IDS = {"GB1", "ES1", "IT1", "L1", "FR1"}
 data_scope = st.sidebar.radio(
     "🏟️ Data Scope",
@@ -227,7 +227,7 @@ st.markdown("> The **Premier League premium** is real — PL players are valued 
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 5: Foot Preference — Dynamic Insight (Request #3 fix)
+# Chart 5: Foot Preference
 # ═══════════════════════════════════════════════════════════════
 st.subheader("5. 🦶 Foot Preference — Does It Affect Value?")
 
@@ -251,7 +251,7 @@ with col_a:
     plt.close()
 
 with col_b:
-    # Dynamic insight based on actual data (Request #3 fix)
+    # Dynamic insight based on actual data
     if len(foot_avg) >= 2:
         top_foot = foot_avg["mean"].idxmax()
         second_foot = foot_avg["mean"].drop(top_foot).idxmax() if len(foot_avg) >= 2 else None
@@ -320,7 +320,7 @@ st.markdown("> Players with **10+ Champions League appearances** are worth ~5x m
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 7: Goals/Assists vs Value — SPLIT BY POSITION (Request #4)
+# Chart 7: Goals/Assists vs Value — Split by Position
 # ═══════════════════════════════════════════════════════════════
 st.subheader("7. ⚽ Goals & Assists vs Market Value — By Position")
 
@@ -376,7 +376,7 @@ if len(available_pos) > 0:
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 8: Correlation Heatmap — with age explanation (Request #7)
+# Chart 8: Correlation Heatmap
 # ═══════════════════════════════════════════════════════════════
 st.subheader("8. 🔥 Feature Correlation Heatmap")
 
@@ -408,7 +408,7 @@ for i, (feat, corr_val) in enumerate(target_corr.head(5).items()):
     with top_corr_cols[i]:
         st.metric(feat.replace("_", " ").title(), f"r = {corr_val:.3f}")
 
-# Age correlation explanation (Request #7)
+# Age correlation explanation
 age_corr = corr_matrix.loc["age", "log_market_value"]
 age_sq_corr = corr_matrix.loc["age_squared", "log_market_value"]
 st.markdown(
@@ -483,7 +483,7 @@ st.markdown("> Market values have **inflated steadily** over the past decade, "
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Chart 11: Confederation — Distribution + Simpson's Paradox (Request #1)
+# Chart 11: Confederation — Distribution & Sample Bias
 # ═══════════════════════════════════════════════════════════════
 st.subheader("11. 🌍 Value by Confederation — Distribution & Sample Bias")
 
@@ -492,56 +492,73 @@ conf_counts = conf_data.groupby("confederation").size()
 valid_confs = conf_counts[conf_counts >= 50].index.tolist()
 conf_data = conf_data[conf_data["confederation"].isin(valid_confs)]
 
-col_bar, col_dist = st.columns(2)
+conf_avg = conf_data.groupby("confederation")["market_value_in_eur"].agg(["mean", "count"]).reset_index()
+conf_avg = conf_avg.sort_values("mean", ascending=True)
 
-with col_bar:
-    # Original average bar chart
-    conf_avg = conf_data.groupby("confederation")["market_value_in_eur"].agg(["mean", "count"]).reset_index()
-    conf_avg = conf_avg.sort_values("mean", ascending=True)
+fig, ax = plt.subplots(figsize=(10, 4))
+bars = ax.barh(conf_avg["confederation"], conf_avg["mean"] / 1e6,
+               color=plt.cm.YlGn(np.linspace(0.3, 0.9, len(conf_avg))), edgecolor="black")
+ax.set_xlabel("Average Market Value (€ Millions)")
+ax.set_title("Average Player Value by Confederation")
+for bar, (_, row) in zip(bars, conf_avg.iterrows()):
+    ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height() / 2,
+            f"€{row['mean']/1e6:.1f}M (n={int(row['count']):,})",
+            va="center", fontsize=9, color="#FAFAFA")
+plt.tight_layout()
+st.pyplot(fig)
+plt.close()
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    bars = ax.barh(conf_avg["confederation"], conf_avg["mean"] / 1e6,
-                   color=plt.cm.YlGn(np.linspace(0.3, 0.9, len(conf_avg))), edgecolor="black")
-    ax.set_xlabel("Average Market Value (€ Millions)")
-    ax.set_title("Average Player Value by Confederation")
-    for bar, (_, row) in zip(bars, conf_avg.iterrows()):
-        ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height() / 2,
-                f"€{row['mean']/1e6:.1f}M (n={int(row['count']):,})",
-                va="center", fontsize=9, color="#FAFAFA")
-    st.pyplot(fig)
-    plt.close()
+# Overlaid KDE — area proportional to population
+from scipy.stats import gaussian_kde
 
-with col_dist:
-    # NEW: Distribution violin/box plot
-    fig, ax = plt.subplots(figsize=(7, 4))
-    conf_order = conf_avg["confederation"].tolist()
-    sns.boxplot(
-        data=conf_data, x="confederation", y="log_market_value",
-        order=conf_order, palette="YlGn", ax=ax, fliersize=2,
-    )
-    ax.set_xlabel("Confederation")
-    ax.set_ylabel("Log Market Value")
-    ax.set_title("Value Distribution by Confederation")
-    ax.tick_params(axis="x", rotation=30)
-    st.pyplot(fig)
-    plt.close()
+conf_colors = {
+    "UEFA": "#4CAF50",
+    "CONMEBOL/CONCACAF": "#FFD700",
+    "AFC": "#FF6B35",
+    "CAF": "#4A90D9",
+    "Other": "#999999",
+}
+# Sort by count descending so the largest is drawn first (behind smaller ones)
+conf_order_by_count = conf_avg.sort_values("count", ascending=False)["confederation"].tolist()
+
+fig, ax = plt.subplots(figsize=(10, 5))
+x_grid = np.linspace(conf_data["log_market_value"].min(), conf_data["log_market_value"].max(), 300)
+
+for conf in conf_order_by_count:
+    subset = conf_data[conf_data["confederation"] == conf]["log_market_value"].dropna()
+    if len(subset) < 10:
+        continue
+    kde = gaussian_kde(subset)
+    density = kde(x_grid) * len(subset)  # scale by count so area ∝ population
+    color = conf_colors.get(conf, "#AAAAAA")
+    ax.fill_between(x_grid, density, alpha=0.3, color=color)
+    ax.plot(x_grid, density, linewidth=2, color=color, label=f"{conf} (n={len(subset):,})")
+
+ax.set_xlabel("Log Market Value")
+ax.set_ylabel("Player Count (density)")
+ax.set_title("Market Value Distribution by Confederation (Area = Population)")
+ax.legend(framealpha=0.8)
+ax.grid(True, alpha=0.2)
+plt.tight_layout()
+st.pyplot(fig)
+plt.close()
 
 # Simpson's Paradox / sample bias insight
 st.warning(
-    "**⚠️ Beware of incorrect conclusions from correct data!**\n\n"
+    "**Beware of incorrect conclusions from correct data!**\n\n"
     "AFC (Asian Football Confederation) players may appear higher-valued on average, "
     "but this is a classic case of **sampling bias / survivorship bias**. The AFC players "
     "in this dataset are overwhelmingly those who made it to European leagues — they are the "
     "**elite subset**, not representative of all AFC players.\n\n"
-    "The distribution chart (right) reveals the truth: when you look at the full spread, "
-    "AFC's median is much closer to other confederations. A small sample of elite players "
-    "inflates the average. **Always check distributions, not just averages.**"
+    "The distribution chart above makes this clear: UEFA dominates the dataset, while AFC's "
+    "tiny curve sits higher only because it represents a handful of elite exports. "
+    "**Always check distributions, not just averages.**"
 )
 
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# Player Lookup — Value Trajectory + 3 Future Seasons (Request #8)
+# Player Lookup — Value Trajectory & Future Prediction
 # ═══════════════════════════════════════════════════════════════
 st.subheader("🔎 Player Lookup — Value Trajectory & Future Prediction")
 
@@ -555,26 +572,45 @@ def load_xgb_model():
 
 xgb_pipeline = load_xgb_model()
 
-player_name = st.text_input("Search for a player (e.g., Kylian Mbappe, Erling Haaland)")
+all_player_names = sorted(df_full["player_name"].dropna().unique().tolist())
+
+player_search = st.text_input("Start typing a player name...", key="player_search",
+                              placeholder="e.g. Kylian Mbappe, Erling Haaland")
+
+player_name = None
+if player_search and len(player_search) >= 2:
+    # Find matching names (case-insensitive substring match)
+    search_lower = player_search.lower()
+    # Prioritize names that start with the query, then contains
+    starts_with = [n for n in all_player_names if n.lower().startswith(search_lower)]
+    contains = [n for n in all_player_names if search_lower in n.lower() and n not in starts_with]
+    suggestions = (starts_with + contains)[:8]
+
+    if len(suggestions) == 0:
+        st.warning("No player found. Try a different name.")
+    elif len(suggestions) == 1:
+        player_name = suggestions[0]
+        st.success(f"**{player_name}**")
+    else:
+        player_name = st.selectbox(
+            f"Found {len(starts_with + contains)} matches — select a player:",
+            suggestions,
+            key="player_select",
+        )
 
 if player_name:
-    matches = df_full[df_full["player_name"].str.contains(player_name, case=False, na=False)]
+    matches = df_full[df_full["player_name"] == player_name]
     if len(matches) == 0:
-        st.warning("No player found. Try a different name.")
+        st.warning("No data found for this player.")
     else:
-        unique_players = matches["player_name"].unique()
-        if len(unique_players) > 1:
-            selected = st.selectbox("Multiple matches — select one:", unique_players)
-            player_data = matches[matches["player_name"] == selected]
-        else:
-            player_data = matches
+        player_data = matches
 
         player_data = player_data.sort_values("season")
 
         # Player info cards
         latest_row = player_data.iloc[-1]
 
-        # ── Predict next 3 seasons (Request #8) ──
+        # ── Predict next 3 seasons ──
         predicted_values = []
         if xgb_pipeline is not None:
             from src.models import NUMERIC_FEATURES, CATEGORICAL_FEATURES

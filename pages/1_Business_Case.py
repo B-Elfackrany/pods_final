@@ -12,7 +12,7 @@ st.set_page_config(page_title="Business Case", page_icon="🏠", layout="wide")
 st.title("🏠 Business Case & Data Presentation")
 st.markdown("### The Problem: How Much Is a Football Player Worth?")
 
-# ── Data scope toggle (Request #10) ──
+# ── Data scope toggle ──
 TOP5_IDS = {"GB1", "ES1", "IT1", "L1", "FR1"}
 data_scope = st.sidebar.radio(
     "🏟️ Data Scope",
