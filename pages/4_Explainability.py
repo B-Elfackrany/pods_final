@@ -148,6 +148,20 @@ st.markdown("*Each dot is a player. Color = feature value (red = high, blue = lo
 
 fig, ax = plt.subplots(figsize=(12, 8))
 shap.plots.beeswarm(shap_values, max_display=15, show=False)
+# Force white text on all elements (SHAP overrides rcParams)
+for fig_obj in [plt.gcf()]:
+    for ax_obj in fig_obj.axes:
+        ax_obj.set_xlabel(ax_obj.get_xlabel(), color="#FAFAFA")
+        ax_obj.set_ylabel(ax_obj.get_ylabel(), color="#FAFAFA")
+        ax_obj.title.set_color("#FAFAFA")
+        for label in ax_obj.get_xticklabels() + ax_obj.get_yticklabels():
+            label.set_color("#FAFAFA")
+    # Fix colorbar label
+    for cb_ax in fig_obj.axes:
+        if cb_ax.get_ylabel():
+            cb_ax.yaxis.label.set_color("#FAFAFA")
+        for label in cb_ax.get_yticklabels():
+            label.set_color("#FAFAFA")
 st.pyplot(plt.gcf())
 plt.close("all")
 
@@ -171,6 +185,11 @@ st.subheader("2. Mean Absolute SHAP Values — Feature Rankings")
 
 fig, ax = plt.subplots(figsize=(10, 6))
 shap.plots.bar(shap_values, max_display=15, show=False)
+for ax_obj in plt.gcf().axes:
+    ax_obj.set_xlabel(ax_obj.get_xlabel(), color="#FAFAFA")
+    ax_obj.title.set_color("#FAFAFA")
+    for label in ax_obj.get_xticklabels() + ax_obj.get_yticklabels():
+        label.set_color("#FAFAFA")
 st.pyplot(plt.gcf())
 plt.close("all")
 
@@ -201,6 +220,11 @@ if position_shap:
                 st.markdown(f"#### {pos} ({position_shap[pos]['n_samples']} players)")
                 fig, ax = plt.subplots(figsize=(7, 5))
                 shap.plots.bar(position_shap[pos]["shap_values"], max_display=10, show=False)
+                for ax_obj in plt.gcf().axes:
+                    ax_obj.set_xlabel(ax_obj.get_xlabel(), color="#FAFAFA")
+                    ax_obj.title.set_color("#FAFAFA")
+                    for label in ax_obj.get_xticklabels() + ax_obj.get_yticklabels():
+                        label.set_color("#FAFAFA")
                 st.pyplot(plt.gcf())
                 plt.close("all")
 else:
@@ -230,6 +254,12 @@ if selected_player:
 
         fig, ax = plt.subplots(figsize=(10, 6))
         shap.plots.waterfall(shap_values[idx], max_display=12, show=False)
+        for ax_obj in plt.gcf().axes:
+            ax_obj.set_xlabel(ax_obj.get_xlabel(), color="#FAFAFA")
+            ax_obj.set_ylabel(ax_obj.get_ylabel(), color="#FAFAFA")
+            ax_obj.title.set_color("#FAFAFA")
+            for label in ax_obj.get_xticklabels() + ax_obj.get_yticklabels():
+                label.set_color("#FAFAFA")
         st.pyplot(plt.gcf())
         plt.close("all")
 
