@@ -1,4 +1,4 @@
-data/
+*.csv
 *.zip
 .env
 __pycache__/
