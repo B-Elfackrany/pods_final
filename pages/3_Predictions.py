@@ -173,10 +173,13 @@ with col_a:
     for idx in predictions.index:
         row = predictions.loc[idx]
         name = row.get("player_name", "Unknown")
+        season = row.get("season", None)
         actual = np.expm1(row["y_true_log"])
         predicted = np.expm1(row[pred_col])
+        season_str = f"Season: {int(season)}/{int(season)+1}<br>" if pd.notna(season) else ""
         hover_texts.append(
             f"<b>{name}</b><br>"
+            f"{season_str}"
             f"Actual: €{actual/1e6:.1f}M<br>"
             f"Predicted: €{predicted/1e6:.1f}M<br>"
             f"Diff: €{(predicted - actual)/1e6:+.1f}M"
